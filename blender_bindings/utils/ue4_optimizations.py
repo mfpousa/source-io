@@ -60,106 +60,36 @@ def process_skybox_scaling(master_col):
 
     print("[+] 3D Skybox scaling and alignment optimization complete.")
 
-def optimize_brush_geometry(master_col):
-    """
-    Coalesces adjacent brush faces sharing identical materials to optimize draw calls,
-    and sets up secondary UV channel for UE4 lightmass baking.
-    """
-    print("[+] Running Brush Geometry Coalescence and UV optimization...")
-    brush_objects = []
-    
-    for obj in master_col.all_objects:
-        if obj.type == 'MESH' and ("brush" in obj.name.lower() or "worldspawn" in obj.name.lower()):
-            brush_objects.append(obj)
-            
-    if not brush_objects:
-        print("[-] No brush mesh objects found to optimize.")
-        return
-
-    material_groups = {}
-    for obj in brush_objects:
-        if len(obj.material_slots) > 0 and obj.material_slots[0].material:
-            mat_name = obj.material_slots[0].material.name
-            if mat_name not in material_groups:
-                material_groups[mat_name] = []
-            material_groups[mat_name].append(obj)
-
-    print(f"[+] Found {len(material_groups)} unique brush material groups.")
-    
-    # Save original selection/active state
-    orig_active = bpy.context.view_layer.objects.active
-    orig_selected = list(bpy.context.selected_objects)
-
-    for mat_name, objs in material_groups.items():
-        if len(objs) < 2:
-            continue
-            
-        bpy.ops.object.select_all(action='DESELECT')
-        for obj in objs:
-            obj.select_set(True)
-            
-        bpy.context.view_layer.objects.active = objs[0]
-        
-        # Join objects
-        try:
-            bpy.ops.object.join()
-            coalesced_obj = bpy.context.view_layer.objects.active
-            coalesced_obj.name = f"Coalesced_Brush_{mat_name}"
-            
-            # Enter edit mode to clean double vertices & generate lightmap UVs
-            bpy.ops.object.mode_set(mode='EDIT')
-            bpy.ops.mesh.select_all(action='SELECT')
-            bpy.ops.mesh.remove_doubles()
-            
-            # Create LightmapUV layer if needed
-            uv_maps = coalesced_obj.data.uv_layers
-            if len(uv_maps) < 2:
-                uv_maps.new(name="LightmapUV")
-                
-            uv_maps["LightmapUV"].active = True
-            bpy.ops.uv.smart_project(angle_limit=66.0, island_margin=0.02)
-            uv_maps[0].active = True
-            
-            bpy.ops.object.mode_set(mode='OBJECT')
-        except Exception as e:
-            print(f"[-] Failed to coalesce group {mat_name}: {e}")
-            if bpy.context.mode != 'OBJECT':
-                bpy.ops.object.mode_set(mode='OBJECT')
-
-    # Restore selection/active state
-    bpy.ops.object.select_all(action='DESELECT')
-    for obj in orig_selected:
-        try:
-            obj.select_set(True)
-        except ReferenceError:
-            pass
-    if orig_active:
-        try:
-            bpy.context.view_layer.objects.active = orig_active
-        except ReferenceError:
-            pass
-
-    print("[+] Brush Geometry Coalescence and Lightmap UV generation complete.")
-
 def convert_triggers_to_collisions(master_col):
     """
-    Renames triggers and clip brushes to UE4 standard 'UCX_' prefix 
-    for automatic collision hull creation on import.
+    Renames specialized triggers and clip brush entities to 'UCX_' prefix 
+    for automatic collision hull creation in UE4.
+    
+    CRITICAL: Excludes worldspawn and renderable world geometry (func_detail) 
+    to prevent the level meshes from being imported as invisible collision blocks.
     """
     print("[+] Checking for trigger and clip volume conversions...")
     collision_count = 0
     
+    # Names of entities that are purely collision/trigger and should not render
+    COLLISION_SIGNATURES = ["trigger_", "func_clip", "func_brush_clip"]
+    
     for obj in master_col.all_objects:
         if obj.type == 'MESH':
-            is_collision_volume = False
-            for slot in obj.material_slots:
-                if slot.material:
-                    mat_name = slot.material.name.lower()
-                    if "clip" in mat_name or "trigger" in mat_name or "collision" in mat_name:
-                        is_collision_volume = True
-                        break
+            # Skip core level structures (worldspawn) and detail geometry
+            obj_name_lower = obj.name.lower()
+            if "worldspawn" in obj_name_lower or "func_detail" in obj_name_lower:
+                continue
+                
+            # Check if this object represents a trigger/clip entity or is explicitly tagged
+            is_collision_entity = any(sig in obj_name_lower for sig in COLLISION_SIGNATURES)
             
-            if is_collision_volume:
+            # Fallback check on material shaders if name is generic but entity type matches
+            if not is_collision_entity and obj.get("entity_data"):
+                classname = obj["entity_data"].get("classname", "").lower()
+                is_collision_entity = any(sig in classname for sig in COLLISION_SIGNATURES)
+            
+            if is_collision_entity:
                 if not obj.name.startswith("UCX_"):
                     obj.name = f"UCX_{obj.name}"
                     collision_count += 1
@@ -170,6 +100,5 @@ def run_ue4_optimizations(master_col):
     """Runs all optimizations to prepare the imported map for Unreal Engine 4 / Datasmith"""
     print("[+] Beginning UE4/Datasmith Map Import Optimizations...")
     process_skybox_scaling(master_col)
-    optimize_brush_geometry(master_col)
     convert_triggers_to_collisions(master_col)
     print("[+] UE4/Datasmith Map Import Optimizations completed successfully!")
