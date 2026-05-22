@@ -108,6 +108,54 @@ def convert_triggers_to_collisions(master_col):
                     
     print(f"[+] Converted {collision_count} volumes to UE4-compatible collision meshes (UCX_ prefix).")
 
+def generate_lightmap_uv(obj):
+    """
+    Creates a non-overlapping secondary UV map channel named 'LightmapUV' 
+    (equivalent to UV Channel 1 in Unreal Engine) and unwraps the geometry.
+    """
+    try:
+        # Save selection state
+        orig_active = bpy.context.view_layer.objects.active
+        orig_selected = list(bpy.context.selected_objects)
+        
+        bpy.ops.object.select_all(action='DESELECT')
+        obj.select_set(True)
+        bpy.context.view_layer.objects.active = obj
+        
+        uv_maps = obj.data.uv_layers
+        # Unreal expects the lightmap coordinates in the 2nd channel (index 1)
+        if len(uv_maps) < 2:
+            uv_maps.new(name="LightmapUV")
+            
+        uv_maps["LightmapUV"].active = True
+        
+        # Enter edit mode and unwrap with smart project (ensures no overlaps)
+        bpy.ops.object.mode_set(mode='EDIT')
+        bpy.ops.mesh.select_all(action='SELECT')
+        bpy.ops.uv.smart_project(angle_limit=66.0, island_margin=0.02)
+        bpy.ops.object.mode_set(mode='OBJECT')
+        
+        # Keep primary texture UV active for standard material rendering
+        uv_maps[0].active = True
+        
+        # Restore selection state
+        bpy.ops.object.select_all(action='DESELECT')
+        for o in orig_selected:
+            try:
+                o.select_set(True)
+            except ReferenceError:
+                pass
+        if orig_active:
+            try:
+                bpy.context.view_layer.objects.active = orig_active
+            except ReferenceError:
+                pass
+                
+    except Exception as e:
+        print(f"[-] Failed to generate Lightmap UV for {obj.name}: {e}")
+        if bpy.context.mode != 'OBJECT':
+            bpy.ops.object.mode_set(mode='OBJECT')
+
 def split_and_consolidate_static_geometry(master_col):
     """
     Spatially optimizes monolithic static world geometry (worldspawn, func_detail):
@@ -115,14 +163,15 @@ def split_and_consolidate_static_geometry(master_col):
     2. Splits them by loose parts to isolate individual room pieces.
     3. Groups pieces geographically into a 3D spatial grid (e.g. 15m grid cells).
     4. Re-merges (consolidates) localized pieces sharing the same material within each cell.
+    5. Automatically generates non-overlapping secondary Lightmap UVs for UE4 baking.
     """
     static_targets = []
     for obj in master_col.all_objects:
         if obj.type == 'MESH':
             name_lower = obj.name.lower()
-            # Only optimize static structural geometry (worldspawn, func_detail)
+            # Only optimize static structural geometry (worldspawn, world_geometry)
             # Avoid interactive entities (doors, buttons, physics boxes)
-            if ("worldspawn" in name_lower or "func_detail" in name_lower) and not obj.name.startswith("UCX_"):
+            if ("worldspawn" in name_lower or "world_geometry" in name_lower) and not obj.name.startswith("UCX_"):
                 static_targets.append(obj)
 
     if not static_targets:
@@ -208,8 +257,9 @@ def split_and_consolidate_static_geometry(master_col):
 
     print(f"[+] Clustering fragments into {len(spatial_groups)} material-spatial cells...")
 
-    # Phase 4: Spatial Re-merging / Consolidation
+    # Phase 4: Spatial Re-merging / Consolidation & UV Generation
     consolidated_count = 0
+    uv_generation_count = 0
     
     for grid_key, objs in spatial_groups.items():
         # Filter out reference-dead or already joined objects
@@ -222,7 +272,13 @@ def split_and_consolidate_static_geometry(master_col):
             except ReferenceError:
                 pass
 
-        if len(valid_objs) < 2:
+        if len(valid_objs) == 0:
+            continue
+
+        if len(valid_objs) == 1:
+            # Standalone element: No merging needed, just generate Lightmap UV channel directly
+            generate_lightmap_uv(valid_objs[0])
+            uv_generation_count += 1
             continue
 
         bpy.ops.object.select_all(action='DESELECT')
@@ -242,9 +298,14 @@ def split_and_consolidate_static_geometry(master_col):
             bpy.ops.mesh.remove_doubles()
             bpy.ops.object.mode_set(mode='OBJECT')
             
+            # Rename cleanly
             mat_name, gx, gy, gz = grid_key
             merged_obj.name = f"Consolidated_{mat_name}_G_{gx}_{gy}_{gz}"
             consolidated_count += 1
+            
+            # Generate Lightmap UV channel for the consolidated mesh
+            generate_lightmap_uv(merged_obj)
+            uv_generation_count += 1
         except Exception as e:
             print(f"[-] Failed to consolidate grid cell {grid_key}: {e}")
             if bpy.context.mode != 'OBJECT':
@@ -263,7 +324,8 @@ def split_and_consolidate_static_geometry(master_col):
         except ReferenceError:
             pass
 
-    print(f"[+] Spatial consolidation complete. Re-merged fragments into {consolidated_count} optimized, room-scale meshes!")
+    print(f"[+] Spatial consolidation complete. Re-merged fragments into {consolidated_count} meshes.")
+    print(f"[+] Lightmap UVs successfully generated for {uv_generation_count} static meshes!")
 
 def run_ue4_optimizations(master_col):
     """Runs all optimizations to prepare the imported map for Unreal Engine 4 / Datasmith"""
