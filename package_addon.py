@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 
 # Paths
-ROOT_DIR = Path(__file__).resolve().parent.parent
+ROOT_DIR = Path(__file__).resolve().parent
 DIST_DIR = ROOT_DIR / "dist"
 
 # Files and directories to exclude from the addon zip package
@@ -23,7 +23,8 @@ EXCLUDE_PATTERNS = {
     r"^tests",
     r"^TODO\.md$",
     r"^LICENSE$",
-    r"^\.gitignore$"
+    r"^\.gitignore$",
+    r"^package_addon\.py$"
 }
 
 def get_addon_version() -> str:
