@@ -1,4 +1,13 @@
 import bpy
+from mathutils import Vector
+
+def get_bbox_center(obj):
+    """Calculates the world-space center of an object's bounding box."""
+    try:
+        mw = obj.matrix_world
+        return sum((mw @ Vector(corner) for corner in obj.bound_box), Vector()) / 8
+    except Exception:
+        return obj.location
 
 def process_skybox_scaling(master_col):
     """
@@ -22,12 +31,15 @@ def process_skybox_scaling(master_col):
     
     print(f"[+] Found Sky Camera at {sky_origin} with Scale Factor {scale_factor}x")
     
-    # Identify skybox geometry by finding meshes clustered around sky_camera
+    # Identify skybox geometry by finding meshes whose true geometry centers are clustered near the sky_camera.
+    # We use a tight threshold of 100 Blender meters (~4350 Hammer units) because 3D skyboxes are small
+    # and the main playable map is situated much further away.
     sky_objs = []
     for obj in master_col.all_objects:
         if obj.type == 'MESH' and obj != sky_camera:
-            dist = (obj.location - sky_origin).length
-            if dist < 3000.0:
+            geom_center = get_bbox_center(obj)
+            dist = (geom_center - sky_origin).length
+            if dist < 100.0:
                 sky_objs.append(obj)
                 
     if not sky_objs:
@@ -48,7 +60,7 @@ def process_skybox_scaling(master_col):
             col.objects.unlink(obj)
         skybox_col.objects.link(obj)
         
-        # Scale and position
+        # Scale and position relative to the sky origin
         rel_loc = obj.location - sky_origin
         obj.location = rel_loc * scale_factor
         obj.scale = obj.scale * scale_factor
