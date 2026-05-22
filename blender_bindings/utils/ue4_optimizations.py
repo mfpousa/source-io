@@ -158,82 +158,74 @@ def generate_lightmap_uv(obj):
 
 def split_and_consolidate_static_geometry(master_col):
     """
-    Spatially optimizes monolithic static world geometry (worldspawn, func_detail):
-    1. Splits massive meshes by material (reducing draw call slots to exactly 1).
-    2. Splits them by loose parts to isolate individual room pieces.
-    3. Groups pieces geographically into a 3D spatial grid (e.g. 15m grid cells).
+    Spatially optimizes monolithic static world geometry (worldspawn, func_detail) and displacements:
+    1. Splits world_geometry once by material (fast, reduces draw call slots to exactly 1).
+    2. Combines these material parts with displacement terrain tiles (already separate).
+    3. Groups all elements geographically into a 3D spatial grid (e.g., 15m grid cells).
     4. Re-merges (consolidates) localized pieces sharing the same material within each cell.
     5. Automatically generates non-overlapping secondary Lightmap UVs for UE4 baking.
     """
-    static_targets = []
+    world_geom_targets = []
+    disp_targets = []
+    
     for obj in master_col.all_objects:
-        if obj.type == 'MESH':
+        if obj.type == 'MESH' and not obj.name.startswith("UCX_"):
             name_lower = obj.name.lower()
-            # Optimize static structural geometry (world_geometry, worldspawn) and displacement terrain (disp)
-            # Avoid interactive entities (doors, buttons, physics boxes)
-            if ("worldspawn" in name_lower or "world_geometry" in name_lower or "_disp_" in name_lower) and not obj.name.startswith("UCX_"):
-                static_targets.append(obj)
+            if "worldspawn" in name_lower or "world_geometry" in name_lower:
+                world_geom_targets.append(obj)
+            elif "_disp_" in name_lower:
+                disp_targets.append(obj)
 
-    if not static_targets:
-        print("[-] No static world geometry found to optimize.")
+    if not world_geom_targets and not disp_targets:
+        print("[-] No static world geometry or displacements found to optimize.")
         return
 
-    print(f"[+] Optimizing and spatially consolidating {len(static_targets)} static meshes...")
+    print(f"[+] Optimizing {len(world_geom_targets)} world meshes and {len(disp_targets)} displacement tiles...")
     
     # Save original selection/active state
     orig_selected = list(bpy.context.selected_objects)
     orig_active = bpy.context.view_layer.objects.active
 
-    # Phase 1 & 2: Split target meshes by Material and then Loose Parts
-    separated_pieces = []
-    
-    for target in static_targets:
+    objects_to_cluster = []
+
+    # Phase 1: Split main world geometry target meshes by Material
+    # This is extremely fast (< 1s) because we only enter/exit Edit Mode once per world mesh
+    for target in world_geom_targets:
         bpy.ops.object.select_all(action='DESELECT')
         target.select_set(True)
         bpy.context.view_layer.objects.active = target
         
-        # 1. Split by Material
         try:
             bpy.ops.object.mode_set(mode='EDIT')
             bpy.ops.mesh.select_all(action='SELECT')
             bpy.ops.mesh.separate(type='MATERIAL')
             bpy.ops.object.mode_set(mode='OBJECT')
             
-            # Record resulting pieces
+            # Collect all material parts
             material_parts = [obj for obj in bpy.context.selected_objects if obj != target]
-            
-            # 2. Split each material part by Loose Parts for spatial granularity
-            for part in material_parts:
-                bpy.ops.object.select_all(action='DESELECT')
-                part.select_set(True)
-                bpy.context.view_layer.objects.active = part
-                
-                bpy.ops.object.mode_set(mode='EDIT')
-                bpy.ops.mesh.select_all(action='SELECT')
-                bpy.ops.mesh.separate(type='LOOSE')
-                bpy.ops.object.mode_set(mode='OBJECT')
-                
-                # Collect all loose fragments
-                separated_pieces.extend(bpy.context.selected_objects)
+            objects_to_cluster.extend(material_parts)
+            # Include the remaining main mesh itself (which holds the first material)
+            objects_to_cluster.append(target)
         except Exception as e:
-            print(f"[-] Error splitting target {target.name}: {e}")
+            print(f"[-] Error splitting target {target.name} by material: {e}")
             if bpy.context.mode != 'OBJECT':
                 bpy.ops.object.mode_set(mode='OBJECT')
+            objects_to_cluster.append(target)
 
-    # Remove duplicates from our list of pieces
-    separated_pieces = list(set(separated_pieces))
-    print(f"[+] Generated {len(separated_pieces)} raw spatial structural fragments.")
+    # Displacements are already separate, single-material tiles, so we can group them directly!
+    objects_to_cluster.extend(disp_targets)
+    
+    # Remove any dead references or non-meshes
+    objects_to_cluster = list(set([obj for obj in objects_to_cluster if obj and obj.type == 'MESH']))
+    print(f"[+] Processing {len(objects_to_cluster)} total optimized elements for spatial grouping.")
 
-    # Phase 3: Spatial and Material Grid Grouping
+    # Phase 2: Spatial and Material Grid Grouping
     # 15.0 meters is roughly 650 Hammer units - a perfect room-scale culling size
     GRID_SIZE = 15.0 
     spatial_groups = {}
 
-    for obj in separated_pieces:
+    for obj in objects_to_cluster:
         try:
-            if not obj.type == 'MESH':
-                continue
-                
             # Find active material name
             mat_name = "NoMaterial"
             if len(obj.material_slots) > 0 and obj.material_slots[0].material:
@@ -257,7 +249,7 @@ def split_and_consolidate_static_geometry(master_col):
 
     print(f"[+] Clustering fragments into {len(spatial_groups)} material-spatial cells...")
 
-    # Phase 4: Spatial Re-merging / Consolidation & UV Generation
+    # Phase 3: Spatial Re-merging / Consolidation & UV Generation
     consolidated_count = 0
     uv_generation_count = 0
     
