@@ -169,9 +169,9 @@ def split_and_consolidate_static_geometry(master_col):
     for obj in master_col.all_objects:
         if obj.type == 'MESH':
             name_lower = obj.name.lower()
-            # Only optimize static structural geometry (worldspawn, world_geometry)
+            # Optimize static structural geometry (world_geometry, worldspawn) and displacement terrain (disp)
             # Avoid interactive entities (doors, buttons, physics boxes)
-            if ("worldspawn" in name_lower or "world_geometry" in name_lower) and not obj.name.startswith("UCX_"):
+            if ("worldspawn" in name_lower or "world_geometry" in name_lower or "_disp_" in name_lower) and not obj.name.startswith("UCX_"):
                 static_targets.append(obj)
 
     if not static_targets:
