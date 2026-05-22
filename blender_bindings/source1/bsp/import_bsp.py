@@ -24,6 +24,7 @@ from ....logger import SourceLogMan, SLogger
 from ...material_loader.material_loader import Source1MaterialLoader
 from ...material_loader.shaders.source1_shader_base import Source1ShaderBase
 from ...utils.bpy_utils import add_material, get_or_create_collection, get_or_create_material, is_blender_4_1
+from ...utils.ue4_optimizations import run_ue4_optimizations
 from .entities.base_entity_handler import BaseEntityHandler
 from .entities.bms_entity_handlers import BlackMesaEntityHandler
 from .entities.csgo_entity_handlers import CSGOEntityHandler
@@ -93,6 +94,10 @@ def import_bsp(map_path: Path, buffer: Buffer, content_manager: ContentManager, 
             bpy.context.view_layer.objects.active = original_active
         except ReferenceError:
             pass
+
+    # Run custom UE4/Datasmith optimizations if enabled
+    if getattr(settings, "optimize_for_ue4", False):
+        run_ue4_optimizations(master_collection)
 
 
 def import_entities(bsp: BSPFile, content_manager: ContentManager, settings: Source1BSPSettings,

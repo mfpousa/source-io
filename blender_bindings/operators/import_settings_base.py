@@ -32,6 +32,7 @@ class GoldSrcBspSettings(BSPOptions):
 
 class Source1BSPSettings(GoldSrcBspSettings, Source1SharedSettings):
     import_cubemaps: BoolProperty(name="Import cubemaps", default=False, subtype='UNSIGNED')
+    optimize_for_ue4: BoolProperty(name="Optimize for Unreal Engine 4 (Datasmith)", default=False)
 
 
 class ModelOptions(SharedOptions, Source1SharedSettings):
