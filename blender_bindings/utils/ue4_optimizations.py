@@ -267,8 +267,36 @@ def split_and_consolidate_static_geometry(master_col):
 
 def run_ue4_optimizations(master_col):
     """Runs all optimizations to prepare the imported map for Unreal Engine 4 / Datasmith"""
-    print("[+] Beginning UE4/Datasmith Map Import Optimizations...")
-    process_skybox_scaling(master_col)
-    split_and_consolidate_static_geometry(master_col)
-    convert_triggers_to_collisions(master_col)
-    print("[+] UE4/Datasmith Map Import Optimizations completed successfully!")
+    print("[SourceIO] Beginning UE4/Datasmith Map Import Optimizations...")
+    
+    # Force Blender to update and cache all newly linked objects and hierarchies
+    bpy.context.view_layer.update()
+    
+    total_objects = len(master_col.all_objects)
+    print(f"[SourceIO] Scanned master collection. Found {total_objects} total objects.")
+    
+    print("[SourceIO] Step 1: Processing Skybox scaling...")
+    try:
+        process_skybox_scaling(master_col)
+    except Exception as e:
+        import traceback
+        print(f"[SourceIO] ERROR in process_skybox_scaling: {e}")
+        traceback.print_exc()
+
+    print("[SourceIO] Step 2: Processing static geometry splitting and consolidation...")
+    try:
+        split_and_consolidate_static_geometry(master_col)
+    except Exception as e:
+        import traceback
+        print(f"[SourceIO] ERROR in split_and_consolidate_static_geometry: {e}")
+        traceback.print_exc()
+
+    print("[SourceIO] Step 3: Processing collision volume conversions...")
+    try:
+        convert_triggers_to_collisions(master_col)
+    except Exception as e:
+        import traceback
+        print(f"[SourceIO] ERROR in convert_triggers_to_collisions: {e}")
+        traceback.print_exc()
+        
+    print("[SourceIO] UE4/Datasmith Map Import Optimizations completed successfully!")

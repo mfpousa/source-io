@@ -96,8 +96,14 @@ def import_bsp(map_path: Path, buffer: Buffer, content_manager: ContentManager, 
             pass
 
     # Run custom UE4/Datasmith optimizations if enabled
+    print(f"[SourceIO] DEBUG: settings={settings}, optimize_for_ue4={getattr(settings, 'optimize_for_ue4', None)}")
     if getattr(settings, "optimize_for_ue4", False):
-        run_ue4_optimizations(master_collection)
+        try:
+            run_ue4_optimizations(master_collection)
+        except Exception as e:
+            import traceback
+            print(f"[SourceIO] ERROR running UE4 optimizations: {e}")
+            traceback.print_exc()
 
 
 def import_entities(bsp: BSPFile, content_manager: ContentManager, settings: Source1BSPSettings,
